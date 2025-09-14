@@ -6,6 +6,7 @@ from node2vec import Node2Vec
 from dotenv import load_dotenv
 import google.generativeai as genai
 import re
+from joblib import Parallel, delayed
 
 # ================================
 # 1. Load environment & DB connect
@@ -72,22 +73,27 @@ for _, row in top_risks.iterrows():
 # ================================
 # 7. Node2Vec embeddings & similarity
 # ================================
-node2vec = Node2Vec(G.to_undirected(), dimensions=32, walk_length=10, num_walks=100, workers=1)
+node2vec = Node2Vec(G.to_undirected(), dimensions=32, walk_length=10, num_walks=100, workers=4)
 model = node2vec.fit(window=5, min_count=1, batch_words=4)
 
-similarities = []
 nodes = list(G.nodes())
-for i in range(len(nodes)):
-    for j in range(i + 1, len(nodes)):
-        try:
-            sim = model.wv.similarity(nodes[i], nodes[j])
-            similarities.append({
-                "node1": nodes[i],
-                "node2": nodes[j],
-                "similarity": float(sim)
-            })
-        except KeyError:
-            continue
+
+def compute_similarity(i, j):
+    try:
+        sim = model.wv.similarity(nodes[i], nodes[j])
+        return {"node1": nodes[i], "node2": nodes[j], "similarity": float(sim)}
+    except KeyError:
+        return None
+
+# Run in parallel with 8 processes (you can tune this)
+similarities = Parallel(n_jobs=8, backend="loky")(
+    delayed(compute_similarity)(i, j)
+    for i in range(len(nodes))
+    for j in range(i + 1, len(nodes))
+)
+
+# Remove Nones
+similarities = [s for s in similarities if s is not None]
 
 # Sort similarities
 similarities = sorted(similarities, key=lambda x: x["similarity"], reverse=True)
