@@ -1,22 +1,22 @@
 1. PAD Summary
 
-* PAD-A: High risk of exceeded limits and high fluid end vibration (mms).  ENG-12 shows high risk for engine oil temperature, engine water temperature and exceeded limits. TRANS-12 shows high risk for transmission oil temperature and exceeded limits.
+* PAD-A: High risk of exceeded limits and high fluid end vibration.  ENG-12 shows high risk of exceeded limits and high engine oil and water temperatures. TRANS-12 shows high risk of exceeded limits and high transmission oil temperature.
 
-* PAD-B: High risk of exceeded limits. ENG-27 shows high risk for engine oil temperature and exceeded limits.
+* PAD-B: High risk of exceeded limits and high engine oil temperature on ENG-27.
 
-* PAD-C: High risk of exceeded limits. ENG-34 shows high risk for engine oil temperature, engine water temperature and exceeded limits.
+* PAD-C: High risk of exceeded limits and high engine oil and water temperatures on ENG-34.
 
 
 2. Component Risks
 
-* ENG-12: HIGH severity.  High engine oil temperature, engine water temperature, and exceeded limits detected. Requires immediate inspection.
-* ENG-27: HIGH severity. High engine oil temperature and exceeded limits detected. Requires immediate inspection.
-* ENG-34: HIGH severity. High engine oil temperature, engine water temperature, and exceeded limits detected. Requires immediate inspection.
-* TRANS-12: HIGH severity. High transmission oil temperature and exceeded limits detected. Requires immediate inspection.
+* ENG-12: HIGH severity - Exceeded limits, high engine oil temperature, and high engine water temperature. Requires immediate inspection due to multiple high-severity risks.
+* ENG-27: HIGH severity - Exceeded limits and high engine oil temperature. Requires immediate inspection.
+* ENG-34: HIGH severity - Exceeded limits and high engine oil and water temperatures. Requires immediate inspection.
+* TRANS-12: HIGH severity - Exceeded limits and high transmission oil temperature. Requires immediate inspection.
 
 
 3. Actions
 
 * Inspect Now: ENG-12, ENG-27, ENG-34, TRANS-12
-* Monitor:  None (All components showing MED risk are associated with components already flagged for immediate inspection).
+* Monitor:  engine_oil_pressure_psi (ENG-12, ENG-27, ENG-34), engine_load_pct (ENG-12, ENG-27, ENG-34), trans_oil_pressure_psi (TRANS-12), fluid_end_vibration_mms (PAD-A)
 
