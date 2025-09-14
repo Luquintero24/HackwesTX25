@@ -1,12 +1,13 @@
 # extract_and_store.py
 # LLM-in-the-loop ETL: Email -> Gemini JSON -> DB (emails + kg_facts w/ severity)
-# Requires: pip install google-generativeai
+# Requires: pip install google-generativeai python-dotenv sqlalchemy
 
-import os, re, json
+import os, re, json, time, random
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, Any, List
 
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,11 +20,57 @@ load_dotenv()
 # -------------------------
 # 0) Configuration
 # -------------------------
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("Please set GEMINI_API_KEY in the environment.")
 genai.configure(api_key=GEMINI_API_KEY)
+
+# Free tier is ~10 req/min; default to 8 to be safe (override with GEMINI_RPM env var)
+RATE_LIMIT_RPM = int(os.getenv("GEMINI_RPM", "8"))
+_LAST_CALL = [0.0]  # mutable capture for simple rate-limit state
+
+def _respect_rate_limit():
+    interval = 60.0 / max(RATE_LIMIT_RPM, 1)
+    now = time.time()
+    wait = _LAST_CALL[0] + interval - now
+    if wait > 0:
+        time.sleep(wait)
+    _LAST_CALL[0] = time.time()
+
+def _resp_text(resp):
+    # Compatible way to get plain text across SDK versions
+    if hasattr(resp, "text") and resp.text:
+        return resp.text
+    try:
+        return resp.candidates[0].content.parts[0].text
+    except Exception:
+        return ""
+
+def _call_gemini_with_retry(contents, generation_config, max_tries=5):
+    """
+    Rate-limit and auto-retry on 429s and transient errors.
+    Respects server-provided retry delay when available.
+    """
+    delay = 5.0
+    for attempt in range(max_tries):
+        _respect_rate_limit()
+        try:
+            return GEMINI.generate_content(contents, generation_config=generation_config)
+        except ResourceExhausted as e:
+            # Parse server-suggested retry delay from error text (if present)
+            msg = str(e)
+            m = re.search(r"retry_delay\s*{\s*seconds:\s*(\d+)", msg)
+            sleep_s = float(m.group(1)) if m else delay
+            time.sleep(sleep_s + random.uniform(0, 1))
+            delay = min(delay * 2, 60.0)
+        except Exception:
+            # Transient: backoff & retry
+            time.sleep(delay + random.uniform(0, 1))
+            delay = min(delay * 2, 60.0)
+    # Final attempt—let exceptions surface
+    _respect_rate_limit()
+    return GEMINI.generate_content(contents, generation_config=generation_config)
 
 # Canonical metric dictionary aligned to your seed_thresholds.py
 CANONICAL_METRICS = {
@@ -41,7 +88,7 @@ CANONICAL_METRICS = {
     # Fluid end
     "fluid_end_vibration_mms": {"unit": "mm/s"},
 }
-# Optional synonyms safety net if the LLM slips (we still force canonical in the prompt)
+# Optional synonyms safety net if the LLM slips
 METRIC_SYNONYMS = {
     "engine_load_percent": "engine_load_pct",
     "engine_oil_pressure": "engine_oil_pressure_psi",
@@ -135,14 +182,18 @@ Rules:
 - For percentages, output the numeric value (e.g., 70% -> value: 70, unit: "%").
 """
 
-GEMINI = genai.GenerativeModel(
-    model_name=GEMINI_MODEL,
-    generation_config={
-        "response_mime_type": "application/json",
-        "response_schema": EXTRACTION_SCHEMA,
-        "temperature": 0.1,
-    },
-)
+# Constructor shape that works across common SDK versions
+try:
+    GEMINI = genai.GenerativeModel(model_name=GEMINI_MODEL)
+except TypeError:
+    GEMINI = genai.GenerativeModel(GEMINI_MODEL)
+
+GENERATION_CONFIG = {
+    "temperature": 0.1,
+    # Newer SDKs accept these; older ones ignore them if passed at call-time
+    "response_mime_type": "application/json",
+    "response_schema": EXTRACTION_SCHEMA,
+}
 
 def normalize_metric_name(name: str) -> Optional[str]:
     name = name.strip()
@@ -153,8 +204,16 @@ def normalize_metric_name(name: str) -> Optional[str]:
     return None
 
 def gemini_extract_metrics(email_body: str) -> Dict[str, Any]:
-    resp = GEMINI.generate_content([GEMINI_INSTRUCTIONS, "\nEMAIL BODY:\n" + email_body.strip()])
-    data = json.loads(resp.text)
+    resp = _call_gemini_with_retry(
+        [GEMINI_INSTRUCTIONS, "\nEMAIL BODY:\n" + email_body.strip()],
+        generation_config=GENERATION_CONFIG,
+    )
+    raw = _resp_text(resp).strip()
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError(f"Gemini did not return JSON: {raw[:200]}")
+    data = json.loads(raw[start:end+1])
 
     out = {
         "metrics": [],
@@ -165,12 +224,10 @@ def gemini_extract_metrics(email_body: str) -> Dict[str, Any]:
         metric_raw = m.get("metric")
         metric = normalize_metric_name(metric_raw) if metric_raw else None
         if not metric:
-            # Skip unknown metric names
             continue
         unit_expected = CANONICAL_METRICS[metric]["unit"]
         val = float(m["value"])
         unit = m.get("unit", unit_expected)
-        # If unit mismatches, keep value but annotate (you can add conversion here if needed)
         if unit != unit_expected:
             out["notes"] = (out["notes"] + f" unit_mismatch:{metric}({unit}!={unit_expected})").strip()
         out["metrics"].append({"metric": metric, "value": val, "unit": unit_expected})
@@ -180,9 +237,7 @@ def gemini_extract_metrics(email_body: str) -> Dict[str, Any]:
 # 3) Threshold-based severity
 # -------------------------
 def pick_best_threshold(rows: List[Threshold], component_type: Optional[str], component_id: Optional[str]) -> Optional[Threshold]:
-    """
-    Preference order: applies_component > applies_type > global (neither set).
-    """
+    """Preference order: applies_component > applies_type > global (neither set)."""
     best = None
     best_score = -1
     for t in rows:
@@ -200,21 +255,23 @@ def pick_best_threshold(rows: List[Threshold], component_type: Optional[str], co
 
 def severity_from_threshold(t: Threshold, value: float) -> str:
     """
-    Map warn/alarm to severities:
-      - HIGH if crosses any alarm_* bound
-      - MED     if crosses any warn_* bound
-      - LOW      otherwise
+    Your requested semantics:
+      - LOW  => value is below the lower bound (warn_low / alarm_low)
+      - HIGH => value is above the upper bound (warn_high / alarm_high)
+      - MED  => value is within the acceptable band (OK)
     """
-    # Handle both sides if provided
+    # Too low?
+    if t.alarm_low is not None and value <= float(t.alarm_low):
+        return "LOW"
+    if t.warn_low is not None and value <= float(t.warn_low):
+        return "LOW"
+    # Too high?
     if t.alarm_high is not None and value >= float(t.alarm_high):
         return "HIGH"
-    if t.alarm_low  is not None and value <= float(t.alarm_low):
+    if t.warn_high is not None and value >= float(t.warn_high):
         return "HIGH"
-    if t.warn_high  is not None and value >= float(t.warn_high):
-        return "MED"
-    if t.warn_low   is not None and value <= float(t.warn_low):
-        return "MED"
-    return "LOW"
+    # OK range
+    return "MED"
 
 def compute_severity(session: Session, component_type: Optional[str], component_id: Optional[str], metric: str, value: float) -> Optional[str]:
     rows = session.execute(
@@ -278,8 +335,7 @@ def insert_email_and_facts(session: Session, envelope: Dict[str, Any], body: str
     existing = session.execute(select(Email).where(Email.message_id == envelope["message_id"])).scalar_one_or_none()
     if existing:
         email = existing
-        # Optionally update fields if you want
-        email.raw_text = body
+        email.raw_text = body or email.raw_text
     else:
         email = Email(
             message_id=envelope["message_id"],
@@ -296,10 +352,13 @@ def insert_email_and_facts(session: Session, envelope: Dict[str, Any], body: str
         session.add(email)
         session.flush()
 
-    # LLM extraction
-    ext = gemini_extract_metrics(body)
+    # Timestamp to stamp onto facts
+    fact_ts = email.sent_at
 
-    # 1) located_at (if we have both)
+    # LLM extraction
+    ext = gemini_extract_metrics(body or "")
+
+    # 1) located_at (if both present)
     if pad_id and component_id:
         session.add(KGFact(
             email_id=email.email_id,
@@ -309,17 +368,21 @@ def insert_email_and_facts(session: Session, envelope: Dict[str, Any], body: str
             obj_text=pad_id,
             obj_type="pad",
             pad_id=pad_id,
-            component_id=component_id
+            component_id=component_id,
+            extracted_at=fact_ts,
         ))
 
     # 2) has_metric (+ severity per thresholds)
+    any_out_of_range = False
     for m in ext["metrics"]:
         metric = m["metric"]
         value = float(m["value"])
         unit = m["unit"]
 
         # severity from thresholds (aligned to applies_type/component)
-        sev = compute_severity(session, component_type, component_id, metric, value)
+        sev = compute_severity(session, component_type, component_id, metric, value) or "MED"
+        if sev != "MED":
+            any_out_of_range = True
 
         session.add(KGFact(
             email_id=email.email_id,
@@ -333,24 +396,26 @@ def insert_email_and_facts(session: Session, envelope: Dict[str, Any], body: str
             metric=metric,
             value=value,
             unit=unit,
-            severity=sev or "LOW",  # default LOW if no threshold
+            severity=sev,              # LOW (too low), MED (OK), HIGH (too high)
+            extracted_at=fact_ts,
         ))
 
-        # If severity is MED/HIGH, emit a symptom fact (exceeded_limits)
-        if sev in ("MED", "HIGH"):
-            session.add(KGFact(
-                email_id=email.email_id,
-                subj_text=component_id or (pad_id or "UNKNOWN"),
-                subj_type="component" if component_id else "pad",
-                predicate="has_symptom",
-                obj_text="exceeded_limits",
-                obj_type="symptom",
-                pad_id=pad_id,
-                component_id=component_id,
-                severity=sev
-            ))
+    # 3) Aggregate symptom if anything is out of range
+    if any_out_of_range:
+        session.add(KGFact(
+            email_id=email.email_id,
+            subj_text=component_id or (pad_id or "UNKNOWN"),
+            subj_type="component" if component_id else "pad",
+            predicate="has_symptom",
+            obj_text="exceeded_limits",
+            obj_type="symptom",
+            pad_id=pad_id,
+            component_id=component_id,
+            severity="HIGH",  # summary flag; detailed direction lives in metric rows
+            extracted_at=fact_ts,
+        ))
 
-    # 3) Qualitative status (optional)
+    # 4) Qualitative status (optional)
     qstat = ext.get("qualitative_status")
     if qstat in ("exceeded", "issue_flagged", "warning", "normal"):
         session.add(KGFact(
@@ -361,61 +426,68 @@ def insert_email_and_facts(session: Session, envelope: Dict[str, Any], body: str
             obj_text=qstat,
             obj_type="status",
             pad_id=pad_id,
-            component_id=component_id
+            component_id=component_id,
+            extracted_at=fact_ts,
         ))
 
     session.commit()
     return email.email_id
 
 # -------------------------
-# 6) Example usage with your three emails
+# 6) Batch: process ALL emails in DB
 # -------------------------
-def _dt(s: str) -> datetime:
-    # Parse a RFC-2822-ish time string; for demo accept "Fri, 12 Sep 2025 08:15:00 +0000"
-    # In production use email.utils.parsedate_to_datetime
-    return datetime.strptime(s, "%a, %d %b %Y %H:%M:%S %z")
-
-def demo():
-    examples = [
-        {
-            "envelope": {
-                "from": "pad-a-lead@patterson-uti.com",
-                "to": "ops@patterson-uti.com",
-                "date": _dt("Fri, 12 Sep 2025 08:15:00 +0000"),
-                "subject": "PAD-B | ENG-27 | Auto-generated event",
-                "message_id": "<R001@patterson-uti.com>",
-            },
-            "body": "OBSERVATION: Routine report: engine within range. Oil 62 psi, temp 112°C, water 82°C, load 70%."
-        },
-        {
-            "envelope": {
-                "from": "pad-b-supervisor@patterson-uti.com",
-                "to": "ops@patterson-uti.com",
-                "date": _dt("Fri, 12 Sep 2025 12:30:00 +0000"),
-                "subject": "PAD-C | ENG-34 | Auto-generated event",
-                "message_id": "<R018@patterson-uti.com>",
-            },
-            "body": "OBSERVATION: Engine reported oil pressure 71 psi, oil temp 129°C, water temp 87°C, load 95%. Condition: exceeded safe operating limits."
-        },
-        {
-            "envelope": {
-                "from": "pad-b-supervisor@patterson-uti.com",
-                "to": "engineering@patterson-uti.com",
-                "date": _dt("Fri, 12 Sep 2025 13:00:00 +0000"),
-                "subject": "PAD-A | TRANS-12 | Auto-generated event",
-                "message_id": "<R020@patterson-uti.com>",
-            },
-            "body": "OBSERVATION: Transmission metrics recorded: oil pressure 165 psi and oil temp 87°C. Issue flagged for follow-up inspection."
-        },
-    ]
-
-    db = SessionLocal()
+def process_all_emails(limit: Optional[int] = None, reextract: bool = True, batch: int = 50):
+    """
+    Iterate all emails in the DB, run Gemini extraction on their bodies,
+    and populate kg_facts with extracted_at = sent_at (fallback to received_at -> now()).
+    - limit: cap how many to process (None = all)
+    - reextract: if True, delete existing facts for that email and reinsert
+    - batch: commit every N emails
+    """
+    db: Session = SessionLocal()
     try:
-        for ex in examples:
-            insert_email_and_facts(db, ex["envelope"], ex["body"])
-        print("Inserted demo emails & facts.")
+        q = db.query(Email).order_by(Email.email_id.asc())
+        if limit:
+            q = q.limit(limit)
+
+        count = 0
+        for e in q:
+            # body from raw_text or legacy raw_tex
+            body = getattr(e, "raw_text", None) or getattr(e, "raw_tex", None) or ""
+            if not body:
+                continue
+
+            if not reextract:
+                # Skip if this email already has any facts
+                already = db.query(KGFact.id).filter(KGFact.email_id == e.email_id).first()
+                if already:
+                    continue
+            else:
+                # Clean slate for this email
+                db.query(KGFact).filter(KGFact.email_id == e.email_id).delete()
+
+            env = {
+                "message_id": e.message_id,
+                "from": e.from_addr,
+                "to": e.to_addr,
+                "date": e.sent_at,
+                "subject": e.subject,
+            }
+            insert_email_and_facts(db, env, body)
+            count += 1
+
+            if count % batch == 0:
+                db.commit()
+
+        db.commit()
+        print(f"Processed {count} emails.")
     finally:
         db.close()
 
+# -------------------------
+# 7) Entry point
+# -------------------------
 if __name__ == "__main__":
-    demo()
+    # Process ALL emails currently in the DB.
+    # Tip: set GEMINI_RPM=8 (or lower) in your .env if you still hit free-tier limits.
+    process_all_emails(limit=None, reextract=True, batch=50)
