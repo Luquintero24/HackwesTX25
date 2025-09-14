@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 215 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+
+    --primary: 210 100% 45%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 210 40% 94%;
+    --secondary-foreground: 215 25% 15%;
+
+    --muted: 210 30% 95%;
+    --muted-foreground: 215 15% 50%;
+
+    --accent: 210 40% 94%;
+    --accent-foreground: 215 25% 15%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 215 20% 88%;
+    --input: 215 20% 88%;
+    --ring: 210 100% 45%;
+
+    /* Risk detection status colors */
+    --status-high: 0 85% 58%;
+    --status-medium: 45 95% 55%;
+    --status-low: 120 60% 45%;
+    --status-normal: 210 50% 60%;
+    --status-unknown: 260 40% 60%;
+    --status-special-purple: 264 83% 58%;
+    --status-special-orange: 25 95% 53%;
+
+    /* Graph colors */
+    --graph-bg: 210 25% 97%;
+    --graph-edge: 215 15% 70%;
+    --graph-node-subject: var(--status-high);
+    --graph-node-object: var(--status-unknown);
+
+    /* Industrial accent colors */
+    --accent-blue: 210 100% 45%;
+    --accent-steel: 210 15% 65%;
+    --accent-warning: 35 100% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 215 30% 8%;
+    --foreground: 210 20% 92%;
+
+    --card: 215 25% 12%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 215 25% 12%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 210 100% 55%;
+    --primary-foreground: 215 30% 8%;
+
+    --secondary: 215 20% 18%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 215 20% 18%;
+    --muted-foreground: 215 15% 65%;
+
+    --accent: 215 20% 18%;
+    --accent-foreground: 210 20% 92%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 215 30% 8%;
+
+    --border: 215 20% 18%;
+    --input: 215 20% 18%;
+    --ring: 210 100% 55%;
+
+    /* Risk detection status colors - dark mode */
+    --status-high: 0 85% 60%;
+    --status-medium: 45 90% 60%;
+    --status-low: 120 50% 50%;
+    --status-normal: 210 60% 65%;
+    --status-unknown: 260 50% 70%;
+    --status-special-purple: 264 83% 68%;
+    --status-special-orange: 25 95% 63%;
+
+    --graph-bg: 215 25% 10%;
+    --graph-edge: 215 15% 40%;
+
+    --accent-blue: 210 100% 55%;
+    --accent-steel: 210 15% 60%;
+    --accent-warning: 35 90% 55%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
