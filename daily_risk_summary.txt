@@ -1,0 +1,22 @@
+1. PAD Summary
+
+* PAD-A: High risk of exceeded limits and high fluid end vibration (mms).  ENG-12 shows high risk for engine oil temperature, engine water temperature and exceeded limits. TRANS-12 shows high risk for transmission oil temperature and exceeded limits.
+
+* PAD-B: High risk of exceeded limits. ENG-27 shows high risk for engine oil temperature and exceeded limits.
+
+* PAD-C: High risk of exceeded limits. ENG-34 shows high risk for engine oil temperature, engine water temperature and exceeded limits.
+
+
+2. Component Risks
+
+* ENG-12: HIGH severity.  High engine oil temperature, engine water temperature, and exceeded limits detected. Requires immediate inspection.
+* ENG-27: HIGH severity. High engine oil temperature and exceeded limits detected. Requires immediate inspection.
+* ENG-34: HIGH severity. High engine oil temperature, engine water temperature, and exceeded limits detected. Requires immediate inspection.
+* TRANS-12: HIGH severity. High transmission oil temperature and exceeded limits detected. Requires immediate inspection.
+
+
+3. Actions
+
+* Inspect Now: ENG-12, ENG-27, ENG-34, TRANS-12
+* Monitor:  None (All components showing MED risk are associated with components already flagged for immediate inspection).
+
