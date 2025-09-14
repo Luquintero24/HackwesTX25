@@ -187,14 +187,6 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
             <div className="w-3 h-3 rounded-full bg-status-unknown"></div>
             <span className="text-muted-foreground">Other Nodes</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-status-special-purple"></div>
-            <span className="text-muted-foreground">PAD-A (Special)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-status-special-orange"></div>
-            <span className="text-muted-foreground">ENG-12 (Special)</span>
-          </div>
         </div>
       </div>
       <svg

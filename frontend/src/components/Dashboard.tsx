@@ -97,8 +97,8 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center gap-3">
               <Activity className="h-8 w-8 text-primary" />
               <div>
-                <h1 className="text-2xl font-bold text-foreground">Risk Detection System</h1>
-                <p className="text-sm text-muted-foreground">Automated monitoring and analysis</p>
+                <h1 className="text-2xl font-bold text-foreground">Nodary</h1>
+                <p className="text-sm text-muted-foreground">Automated monitoring and risk detection</p>
               </div>
             </div>
             <div className="flex items-center gap-4">

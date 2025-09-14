@@ -11,6 +11,11 @@
     "skipLibCheck": true,
     "allowJs": true,
     "noUnusedLocals": false,
-    "strictNullChecks": false
+    "strictNullChecks": false,
+        "types": ["node"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2020",
+    "esModuleInterop": true,
   }
 }
